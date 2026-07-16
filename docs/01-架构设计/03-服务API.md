@@ -1,48 +1,58 @@
 # 03 · 服务 API
 
 > D-18：无认证。请求头 `X-Dag-Actor: human | agent:<id>` 自报身份（缺省拒绝——不是鉴权，是审计与租约归属需要，D-17/D-05）。
+> D-19：**多项目**——除 `/v1/projects*` 外，所有端点挂在 `/v1/projects/{pid}/` 前缀下（下文表格省略前缀）。
 > 暴露面分层是 [05-角色与协作](../00-需求分析/05-角色与协作.md) 权限矩阵在无认证下的实现（D-18）：**范围类端点不写进 Agent 的工具说明**，且 server 对 `actor` 前缀为 `agent:` 的范围操作请求返回 403（软校验，`manual: true` 的落地）。
 
-## 3.1 端点总表
+## 3.0 项目管理（D-19，无前缀）
+
+| 端点 | 语义 | 使用者 |
+|------|------|--------|
+| `POST /v1/projects` | 注册项目 `{name, repo_path}`；repo_path 已存在则幂等返回既有项目 | `dag init` |
+| `GET  /v1/projects` | 项目列表（含各项目聚合进度） | CLI TUI |
+| `GET  /v1/projects/lookup?repo_path=` | 按仓库路径反查（CLI 目录绑定解析第 3 级） | `dag` 各命令 |
+| `GET  /v1/projects/{pid}` | 项目详情 | CLI TUI |
+
+## 3.1 端点总表（均在 `/v1/projects/{pid}/` 下）
 
 ### Worker 面（写进 Worker Agent 的工具说明）
 
 | 端点 | 语义 | 决策 |
 |------|------|------|
-| `POST /v1/tasks/claim-next` | 原子认领下一个匹配任务；无任务时返回 204 + 提示（可 Expand 的 Package 列表） | D-05、FR-05.6 |
-| `POST /v1/tasks/{id}/heartbeat` | 续租；回带 `lease_token` | D-05 |
-| `POST /v1/tasks/{id}/handover-review` | 接力任务：上报现场审查结论（接手后、开工前必调） | D-05 ③ |
-| `POST /v1/tasks/{id}/submit` | 声明完工，触发 diff 核验 + Validator；回带 `lease_token` | D-10、FR-06.2 |
-| `POST /v1/tasks/{id}/fail` | 主动报告无法完成（原因入 attempt） | FR-06.3 |
-| `GET  /v1/tasks/{id}` | 任务详情（spec、inputs 的 artifact 引用、交接上下文） | FR-04 |
-| `GET  /v1/artifacts/{id}` | 读产物元数据（内容经 commit hash 从项目树读） | FR-07.3 |
+| `POST /tasks/claim-next` | 原子认领下一个匹配任务；无任务时返回 204 + 提示（可 Expand 的 Package 列表） | D-05、FR-05.6 |
+| `POST /tasks/{id}/heartbeat` | 续租；回带 `lease_token` | D-05 |
+| `POST /tasks/{id}/handover-review` | 接力任务：上报现场审查结论（接手后、开工前必调） | D-05 ③ |
+| `POST /tasks/{id}/submit` | 声明完工，触发 diff 核验 + Validator；回带 `lease_token` | D-10、FR-06.2 |
+| `POST /tasks/{id}/fail` | 主动报告无法完成（原因入 attempt） | FR-06.3 |
+| `GET  /tasks/{id}` | 任务详情（spec、inputs 的 artifact 引用、交接上下文） | FR-04 |
+| `GET  /artifacts/{id}` | 读产物元数据（内容经 commit hash 从项目树读） | FR-07.3 |
 
 ### Planner 面（写进 Planner Agent 的工具说明）
 
 | 端点 | 语义 | 决策 |
 |------|------|------|
-| `GET  /v1/graph?root={id}&depth=N` | 读子图（含派生态） | FR-02.4 |
-| `POST /v1/graph/publish` | 提交图变更（新增/修改节点与边），服务端跑编译校验，过则原子发布为新 graph_version | **D-01 全自动的唯一入口** |
-| `POST /v1/contracts/{id}/publish` | 发布 Contract 版本，声明 bump 级别；major → 挂起待人批 | D-08 |
-| `GET  /v1/replan-context?task={id}` | 失败任务的重规划上下文（attempts、受影响子图） | D-07 |
+| `GET  /graph?root={id}&depth=N` | 读子图（含派生态） | FR-02.4 |
+| `POST /graph/publish` | 提交图变更（新增/修改节点与边），服务端跑编译校验，过则原子发布为新 graph_version | **D-01 全自动的唯一入口** |
+| `POST /contracts/{id}/publish` | 发布 Contract 版本，声明 bump 级别；major → 挂起待人批 | D-08 |
+| `GET  /replan-context?task={id}` | 失败任务的重规划上下文（attempts、受影响子图） | D-07 |
 
-### 人类面（仅 CLI/UI 使用，不进任何 Agent 工具说明）
+### 人类面（仅 dag-cli 使用，不进任何 Agent 工具说明）
 
 | 端点 | 语义 | 决策 |
 |------|------|------|
-| `POST /v1/packages/{id}/scope` | `{action: pause\|close\|reopen\|archive, reason, until?, permanent?, force?}` | FR-09、D-03、D-04 |
-| `POST /v1/contracts/{id}/approve-major` | 放行破坏性 Contract → 触发影响标记 | D-08 |
-| `POST /v1/tasks/{id}/cancel` | 取消单任务（终租约；`--force` 时丢弃在制品） | D-04 |
-| `GET  /v1/events?after_seq=N&node={id}` | 审计时间线分页拉取 | FR-13 |
-| `GET  /v1/events/stream` (SSE) | 实时事件流（源自 NOTIFY） | D-17、FR-12 |
-| `POST /v1/admin/rebuild-projection` | 事件流重放重建投影 | A-03 |
+| `POST /packages/{id}/scope` | `{action: pause\|close\|reopen\|archive, reason, until?, permanent?, force?}` | FR-09、D-03、D-04 |
+| `POST /contracts/{id}/approve-major` | 放行破坏性 Contract → 触发影响标记 | D-08 |
+| `POST /tasks/{id}/cancel` | 取消单任务（终租约；`--force` 时丢弃在制品） | D-04 |
+| `GET  /events?after_seq=N&node={id}` | 审计时间线分页拉取 | FR-13 |
+| `GET  /events/stream` (SSE) | 实时事件流（源自 NOTIFY，按项目过滤） | D-17、FR-12 |
+| `POST /admin/rebuild-projection` | 事件流重放重建投影 | A-03 |
 
 ## 3.2 关键端点契约
 
 ### claim-next
 
 ```jsonc
-// POST /v1/tasks/claim-next
+// POST /v1/projects/{pid}/tasks/claim-next
 // 请求
 { "capabilities": ["rust", "database"], "lease_ttl_secs": 900 }
 
@@ -88,7 +98,7 @@
 ### handover-review（D-05 ③ 如实上报）
 
 ```jsonc
-// POST /v1/tasks/{id}/handover-review   （lease_token 必带）
+// POST /v1/projects/{pid}/tasks/{id}/handover-review   （lease_token 必带）
 {
   "lease_token": "8c6f...",
   "wip_assessment": "login.rs 已完成 70%，结构可复用；dto.rs 为空文件",
@@ -103,7 +113,7 @@
 ### submit（完工链，D-10/D-11/D-15）
 
 ```jsonc
-// POST /v1/tasks/{id}/submit
+// POST /v1/projects/{pid}/tasks/{id}/submit
 { "lease_token": "8c6f...", "note": "实现完成，本地 cargo check 通过" }
 
 // 服务端同步执行（详见 04 §流程一）：
@@ -121,7 +131,7 @@
 ### graph/publish（D-01 全自动门）
 
 ```jsonc
-// POST /v1/graph/publish
+// POST /v1/projects/{pid}/graph/publish
 {
   "base_version": 42,                  // 乐观锁：不等于当前版本 → 409（D-12 单写者）
   "summary": "展开 server.identity 为 contract/application/infrastructure",
@@ -156,7 +166,7 @@
 ## 3.4 SSE
 
 ```text
-GET /v1/events/stream?after_seq=1024
+GET /v1/projects/{pid}/events/stream?after_seq=1024
 event: task.done
 data: {"seq":1025,"node_id":"nd_...","payload":{...}}
 ```
