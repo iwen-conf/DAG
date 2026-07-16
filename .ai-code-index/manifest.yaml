@@ -1,0 +1,118 @@
+version: 2
+project:
+  name: DAG
+  module: dag
+  type: rust-ai-project-os
+  summary: >
+    AI Project Operating System / AI Build System: hierarchical evolvable DAG,
+    Contract-first boundaries, Pull+Claim workers, Artifact store and validators.
+    Currently in requirements phase under docs/00-需求分析; Rust implementation TBD.
+
+commands:
+  reindex: .ai-code-index/reindex.sh
+  doctor: .ai-code-index/doctor.sh
+  files: .ai-code-index/files.sh
+  stats: .ai-code-index/stats.sh
+  install_index_tools: .ai-code-index/install-tools.sh
+  search: .ai-code-index/search.sh
+  symbols: .ai-code-index/symbols.sh
+
+index:
+  default_profile: code
+  profiles:
+    code:
+      notes: Default agent index. Rust sources when present + light requirements docs + meta.
+      includes:
+        - rust
+        - docs (light)
+        - meta
+    rust:
+      paths:
+        - src
+        - crates
+        - tests
+        - benches
+        - examples
+        - Cargo.toml
+        - Cargo.lock
+      notes: Active when Cargo workspace appears. target/ ignored via ignore_dirs.
+    docs:
+      paths:
+        - docs/00-需求分析
+        - docs/README.md
+      notes: Stable requirements analysis; full docs tree uses docs-full.
+    docs-full:
+      paths:
+        - docs
+    meta:
+      paths:
+        - README.md
+        - .gitignore
+        - AGENTS.md
+        - .ai-code-index
+      notes: Project root config and local index tooling.
+    all:
+      notes: rust + full docs + meta
+    ref:
+      paths:
+        - reference
+        - vendor
+      notes: On-demand only; empty until reference trees exist.
+
+entrypoints:
+  requirements_index:
+    path: docs/00-需求分析/README.md
+    notes: Requirements doc index and reading order.
+  conversation_source:
+    path: docs/00-需求分析/ChatGPT-拆分任务边界方法.md
+    notes: Full exported source conversation for requirements.
+  evolution:
+    path: docs/00-需求分析/00-对话演进与结论.md
+    notes: 11-turn evolution map and non-negotiable consensus.
+
+architecture:
+  requirements:
+    paths:
+      - docs/00-需求分析
+    notes: >
+      Vision, pipeline, node model, state machines, roles, scheduling, node protocol,
+      boundary methodology, parallel conditions, Contract First, Task IR, product positioning.
+  runtime_planned:
+    notes: >
+      Planned packages (not yet in tree): Task Service, Planner/Replanner, Scheduler,
+      Artifact Store, Validator, Worker agents. See docs/00-需求分析/01-系统愿景.md.
+  rust_workspace:
+    paths:
+      - src
+      - crates
+    notes: Reserved for future Rust implementation; not present at index bootstrap.
+
+constraints:
+  code_index:
+    - Use .ai-code-index/search.sh or symbols.sh before unbounded whole-repo rg when locating code/docs.
+    - Use files.sh for profile-aware discovery; stats.sh before broad audits.
+    - Only add Rust/Go helper CLIs; no Python/TypeScript CLI deps for code-index workflows.
+    - search.sh and symbols.sh auto-refresh unless AI_CODE_INDEX_AUTO_REINDEX=0.
+    - Generated index/, tags, .last-profile, .last-indexed-at, .reindex.lock are not source of truth.
+    - Prefer profile docs for requirements; profile rust/code once implementation lands.
+  product:
+    - Core objects are Artifact + DAG + Contract, not Conversation + Memory.
+    - Package vs Task dual state machines; only leaf Task can be Claimed.
+    - Human-only for Package Close/Pause/Reopen/Delete.
+
+ignore_for_index:
+  - .git
+  - .arc
+  - vendor
+  - node_modules
+  - tmp
+  - .DS_Store
+  - .ai-code-index/index
+  - .ai-code-index/tags
+  - .ai-code-index/.last-profile
+  - .ai-code-index/.last-indexed-at
+  - .ai-code-index/.reindex.lock
+  - target
+  - dist
+  - build
+  - "*.log"
