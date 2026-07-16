@@ -9,6 +9,7 @@ use sunmao_store::git::GitWorkspace;
 use sunmao_store::projects::ProjectsRepo;
 use sunmao_store::Store;
 use uuid::Uuid;
+// sqlx used for corruption in rebuild test
 
 fn db_url() -> String {
     std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://sunmao@localhost/sunmao".into())
@@ -491,6 +492,112 @@ async fn m4_events_after_seq_resume() {
 
     let rebuilt = store.rebuild_projection(&pid).await.unwrap();
     assert_eq!(rebuilt["consistent"], true);
+    assert!(rebuilt["events_applied"].as_i64().unwrap() >= 1);
+}
+
+#[tokio::test]
+async fn m4_rebuild_projection_restores_after_corruption() {
+    // A-03: event stream rebuild — corrupt projection, rebuild, match prior state.
+    let (store, pid, dir) = setup().await;
+    store
+        .publish_graph(
+            &pid,
+            "agent:planner",
+            PublishInput {
+                base_version: 0,
+                summary: "rebuild".into(),
+                upsert_nodes: vec![
+                    task("nd_a", "A", "a/", "a"),
+                    task("nd_b", "B", "b/", "b"),
+                ],
+                add_edges: vec![EdgeDraft {
+                    from: "nd_a".into(),
+                    to: "nd_b".into(),
+                }],
+                remove_nodes: vec![],
+            },
+        )
+        .await
+        .unwrap();
+
+    let git = GitWorkspace::new(dir.path());
+    let ca = store
+        .claim_next(&pid, "agent:w1", &[], 120)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(ca.task.id, "nd_a");
+    git.write_file("a/out.txt", "A\n").unwrap();
+    let sa = store
+        .submit(&pid, "nd_a", "agent:w1", ca.lease.token, None)
+        .await
+        .unwrap();
+    assert_eq!(sa.verdict, "done");
+
+    let cb = store
+        .claim_next(&pid, "agent:w2", &[], 120)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(cb.task.id, "nd_b");
+
+    // contract impact mark
+    let _ = store
+        .publish_contract(&pid, "ar_rebuild", "agent:planner", "major", "2.0.0", "nd_a")
+        .await
+        .unwrap();
+    let _ = store
+        .approve_major(&pid, "ar_rebuild", "human")
+        .await
+        .unwrap();
+
+    let before = store.snapshot_projection(&pid).await.unwrap();
+    let a_before = before.iter().find(|n| n["id"] == "nd_a").unwrap().clone();
+    let b_before = before.iter().find(|n| n["id"] == "nd_b").unwrap().clone();
+    assert_eq!(a_before["task_state"], "done");
+    assert_eq!(b_before["task_state"], "claimed");
+    assert_eq!(b_before["needs_replan"], true);
+
+    // Corrupt projection (simulate drift / disaster)
+    sqlx::query(
+        r#"
+        UPDATE node SET task_state='todo', ready=true, owner=NULL, needs_replan=false
+        WHERE project_id=$1 AND id='nd_a'
+        "#,
+    )
+    .bind(&pid)
+    .execute(&store.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"
+        UPDATE node SET task_state='todo', ready=true, owner=NULL, lease_token=NULL, needs_replan=false
+        WHERE project_id=$1 AND id='nd_b'
+        "#,
+    )
+    .bind(&pid)
+    .execute(&store.pool)
+    .await
+    .unwrap();
+
+    let mid = store.snapshot_projection(&pid).await.unwrap();
+    assert_eq!(
+        mid.iter().find(|n| n["id"] == "nd_a").unwrap()["task_state"],
+        "todo"
+    );
+
+    let rebuilt = store.rebuild_projection(&pid).await.unwrap();
+    assert_eq!(rebuilt["consistent"], true);
+    assert!(rebuilt["events_applied"].as_i64().unwrap() >= 3);
+
+    let after = store.snapshot_projection(&pid).await.unwrap();
+    let a_after = after.iter().find(|n| n["id"] == "nd_a").unwrap();
+    let b_after = after.iter().find(|n| n["id"] == "nd_b").unwrap();
+    assert_eq!(a_after["task_state"], a_before["task_state"]);
+    assert_eq!(a_after["ready"], a_before["ready"]);
+    assert_eq!(b_after["task_state"], b_before["task_state"]);
+    assert_eq!(b_after["needs_replan"], b_before["needs_replan"]);
+    assert_eq!(b_after["owner"], b_before["owner"]);
 }
 
 #[tokio::test]

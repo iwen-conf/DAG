@@ -1643,13 +1643,272 @@ impl Store {
         }))
     }
 
+    /// Snapshot of rebuildable projection fields (for consistency tests).
+    pub async fn snapshot_projection(&self, project_id: &str) -> StoreResult<Vec<Value>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, kind, task_state, ready, needs_replan, scope_state, owner,
+                   lease_token::text AS lease_token, plan_state
+            FROM node WHERE project_id = $1 ORDER BY id
+            "#,
+        )
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|r| {
+                json!({
+                    "id": r.get::<String,_>("id"),
+                    "kind": r.get::<String,_>("kind"),
+                    "task_state": r.get::<Option<String>,_>("task_state"),
+                    "ready": r.get::<bool,_>("ready"),
+                    "needs_replan": r.get::<bool,_>("needs_replan"),
+                    "scope_state": r.get::<String,_>("scope_state"),
+                    "owner": r.get::<Option<String>,_>("owner"),
+                    "lease_token": r.get::<Option<String>,_>("lease_token"),
+                    "plan_state": r.get::<String,_>("plan_state"),
+                })
+            })
+            .collect())
+    }
+
+    /// Rebuild projection from append-only event stream (A-03).
+    ///
+    /// Structural rows (node/edge identities, write_scope, paths) are retained —
+    /// graph.published payloads currently store ids not full node bodies.
+    /// All **state projection** fields (task_state, owner/lease, needs_replan,
+    /// scope_state, ready) are reset then reapplied in `seq` order, then ready
+    /// is recomputed.
     pub async fn rebuild_projection(&self, project_id: &str) -> StoreResult<Value> {
-        // v1: recompute ready from current node/edge state (events already applied incrementally)
         let mut tx = self.pool.begin().await?;
+
+        // 1) Reset rebuildable fields to event-stream baseline
+        sqlx::query(
+            r#"
+            UPDATE node SET
+              task_state = CASE WHEN kind = 'task' THEN 'todo' ELSE task_state END,
+              ready = false,
+              owner = NULL,
+              lease_token = NULL,
+              lease_expires = NULL,
+              needs_replan = false,
+              scope_state = CASE WHEN kind = 'package' THEN 'active' ELSE scope_state END,
+              updated_at = now()
+            WHERE project_id = $1
+            "#,
+        )
+        .bind(project_id)
+        .execute(&mut *tx)
+        .await?;
+
+        // 2) Replay events in seq order
+        let events = sqlx::query(
+            r#"
+            SELECT seq, node_id, kind, payload
+            FROM event WHERE project_id = $1 ORDER BY seq
+            "#,
+        )
+        .bind(project_id)
+        .fetch_all(&mut *tx)
+        .await?;
+
+        let mut applied = 0i64;
+        for ev in events {
+            let kind: String = ev.get("kind");
+            let node_id: Option<String> = ev.get("node_id");
+            let payload: Value = ev.get("payload");
+            match kind.as_str() {
+                "graph.published" => {
+                    // nodes already exist structurally; baseline todo is fine
+                    applied += 1;
+                }
+                "task.claimed" => {
+                    if let Some(nid) = &node_id {
+                        let owner = payload
+                            .get("owner")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("unknown");
+                        let token = payload
+                            .get("lease_token")
+                            .and_then(|x| x.as_str())
+                            .and_then(|s| Uuid::parse_str(s).ok());
+                        sqlx::query(
+                            r#"
+                            UPDATE node SET task_state='claimed', ready=false, owner=$3,
+                              lease_token=$4, updated_at=now()
+                            WHERE project_id=$1 AND id=$2
+                            "#,
+                        )
+                        .bind(project_id)
+                        .bind(nid)
+                        .bind(owner)
+                        .bind(token)
+                        .execute(&mut *tx)
+                        .await?;
+                        applied += 1;
+                    }
+                }
+                "task.done" => {
+                    if let Some(nid) = &node_id {
+                        sqlx::query(
+                            r#"
+                            UPDATE node SET task_state='done', ready=false, owner=NULL,
+                              lease_token=NULL, lease_expires=NULL, updated_at=now()
+                            WHERE project_id=$1 AND id=$2
+                            "#,
+                        )
+                        .bind(project_id)
+                        .bind(nid)
+                        .execute(&mut *tx)
+                        .await?;
+                        applied += 1;
+                    }
+                }
+                "task.failed" => {
+                    if let Some(nid) = &node_id {
+                        sqlx::query(
+                            r#"
+                            UPDATE node SET task_state='failed', ready=false, owner=NULL,
+                              lease_token=NULL, lease_expires=NULL, updated_at=now()
+                            WHERE project_id=$1 AND id=$2
+                            "#,
+                        )
+                        .bind(project_id)
+                        .bind(nid)
+                        .execute(&mut *tx)
+                        .await?;
+                        applied += 1;
+                    }
+                }
+                "task.lease_expired" => {
+                    if let Some(nid) = &node_id {
+                        let final_fail = payload
+                            .get("final")
+                            .and_then(|x| x.as_bool())
+                            .unwrap_or(false);
+                        if final_fail {
+                            sqlx::query(
+                                r#"
+                                UPDATE node SET task_state='failed', ready=false, owner=NULL,
+                                  lease_token=NULL, lease_expires=NULL, updated_at=now()
+                                WHERE project_id=$1 AND id=$2
+                                "#,
+                            )
+                            .bind(project_id)
+                            .bind(nid)
+                            .execute(&mut *tx)
+                            .await?;
+                        } else {
+                            sqlx::query(
+                                r#"
+                                UPDATE node SET task_state='ready', ready=true, owner=NULL,
+                                  lease_token=NULL, lease_expires=NULL, updated_at=now()
+                                WHERE project_id=$1 AND id=$2
+                                "#,
+                            )
+                            .bind(project_id)
+                            .bind(nid)
+                            .execute(&mut *tx)
+                            .await?;
+                        }
+                        applied += 1;
+                    }
+                }
+                "task.cancelled" => {
+                    if let Some(nid) = &node_id {
+                        sqlx::query(
+                            r#"
+                            UPDATE node SET task_state='cancelled', ready=false, owner=NULL,
+                              lease_token=NULL, lease_expires=NULL, updated_at=now()
+                            WHERE project_id=$1 AND id=$2
+                            "#,
+                        )
+                        .bind(project_id)
+                        .bind(nid)
+                        .execute(&mut *tx)
+                        .await?;
+                        applied += 1;
+                    }
+                }
+                "task.validated" => {
+                    // validation failure path reopens to ready when not final
+                    if let Some(nid) = &node_id {
+                        let verdict = payload
+                            .get("verdict")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("");
+                        if verdict == "failed" {
+                            sqlx::query(
+                                r#"
+                                UPDATE node SET task_state='ready', ready=true, owner=NULL,
+                                  lease_token=NULL, lease_expires=NULL, updated_at=now()
+                                WHERE project_id=$1 AND id=$2 AND task_state IS DISTINCT FROM 'failed'
+                                "#,
+                            )
+                            .bind(project_id)
+                            .bind(nid)
+                            .execute(&mut *tx)
+                            .await?;
+                            applied += 1;
+                        }
+                    }
+                }
+                "package.scope_changed" => {
+                    if let Some(nid) = &node_id {
+                        let to = payload
+                            .get("to")
+                            .and_then(|x| x.as_str())
+                            .unwrap_or("active");
+                        sqlx::query(
+                            r#"
+                            UPDATE node SET scope_state=$3, updated_at=now()
+                            WHERE project_id=$1 AND id=$2
+                            "#,
+                        )
+                        .bind(project_id)
+                        .bind(nid)
+                        .bind(to)
+                        .execute(&mut *tx)
+                        .await?;
+                        applied += 1;
+                    }
+                }
+                "contract.impact_marked" => {
+                    if let Some(arr) = payload.get("affected").and_then(|a| a.as_array()) {
+                        for a in arr {
+                            if let Some(nid) = a.as_str() {
+                                sqlx::query(
+                                    r#"
+                                    UPDATE node SET needs_replan=true, updated_at=now()
+                                    WHERE project_id=$1 AND id=$2
+                                    "#,
+                                )
+                                .bind(project_id)
+                                .bind(nid)
+                                .execute(&mut *tx)
+                                .await?;
+                            }
+                        }
+                        applied += 1;
+                    }
+                }
+                // heartbeats not stored as events; handover_reported does not change node columns
+                _ => {}
+            }
+        }
+
+        // 3) Ready column from dual-implementation SQL
         let ready = apply_recompute_tx(&mut tx, project_id).await?;
         tx.commit().await?;
+
         let consistent = crate::ready_maint::verify_ready_consistent(&self.pool, project_id).await?;
-        Ok(json!({ "ready_count": ready.len(), "consistent": consistent, "ready": ready }))
+        Ok(json!({
+            "events_applied": applied,
+            "ready_count": ready.len(),
+            "consistent": consistent,
+            "ready": ready,
+        }))
     }
 }
 
