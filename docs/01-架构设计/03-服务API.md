@@ -1,6 +1,6 @@
 # 03 · 服务 API
 
-> D-18：无认证。请求头 `X-Dag-Actor: human | agent:<id>` 自报身份（缺省拒绝——不是鉴权，是审计与租约归属需要，D-17/D-05）。
+> D-18：无认证。请求头 `X-Sunmao-Actor: human | agent:<id>` 自报身份（缺省拒绝——不是鉴权，是审计与租约归属需要，D-17/D-05）。
 > D-19：**多项目**——除 `/v1/projects*` 外，所有端点挂在 `/v1/projects/{pid}/` 前缀下（下文表格省略前缀）。
 > 暴露面分层是 [05-角色与协作](../00-需求分析/05-角色与协作.md) 权限矩阵在无认证下的实现（D-18）：**范围类端点不写进 Agent 的工具说明**，且 server 对 `actor` 前缀为 `agent:` 的范围操作请求返回 403（软校验，`manual: true` 的落地）。
 
@@ -8,9 +8,9 @@
 
 | 端点 | 语义 | 使用者 |
 |------|------|--------|
-| `POST /v1/projects` | 注册项目 `{name, repo_path}`；repo_path 已存在则幂等返回既有项目 | `dag init` |
+| `POST /v1/projects` | 注册项目 `{name, repo_path}`；repo_path 已存在则幂等返回既有项目 | `sunmao init` |
 | `GET  /v1/projects` | 项目列表（含各项目聚合进度） | CLI TUI |
-| `GET  /v1/projects/lookup?repo_path=` | 按仓库路径反查（CLI 目录绑定解析第 3 级） | `dag` 各命令 |
+| `GET  /v1/projects/lookup?repo_path=` | 按仓库路径反查（CLI 目录绑定解析第 3 级） | `sunmao` 各命令 |
 | `GET  /v1/projects/{pid}` | 项目详情 | CLI TUI |
 
 ## 3.1 端点总表（均在 `/v1/projects/{pid}/` 下）
@@ -36,7 +36,7 @@
 | `POST /contracts/{id}/publish` | 发布 Contract 版本，声明 bump 级别；major → 挂起待人批 | D-08 |
 | `GET  /replan-context?task={id}` | 失败任务的重规划上下文（attempts、受影响子图） | D-07 |
 
-### 人类面（仅 dag-cli 使用，不进任何 Agent 工具说明）
+### 人类面（仅 sunmao 使用，不进任何 Agent 工具说明）
 
 | 端点 | 语义 | 决策 |
 |------|------|------|
@@ -154,7 +154,7 @@
 
 | HTTP | code | 场景 |
 |------|------|------|
-| 401 | `MISSING_ACTOR` | 无 `X-Dag-Actor` 头 |
+| 401 | `MISSING_ACTOR` | 无 `X-Sunmao-Actor` 头 |
 | 403 | `HUMAN_ONLY` | agent 调范围/审批端点（05 权限矩阵） |
 | 409 | `LEASE_LOST` | lease_token 不匹配或已过期（fencing，含幽灵提交拒收） |
 | 409 | `STALE_GRAPH_VERSION` | publish 乐观锁失败 |

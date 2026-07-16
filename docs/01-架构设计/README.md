@@ -1,8 +1,9 @@
 # 01 · 架构设计
 
-> 输入：[00-需求分析](../00-需求分析/README.md)（FR-01~FR-13、D-01~D-19 已全部落定，2026-07-16 封版）
-> 本目录把 19 条决策变成可实现的系统设计：组件、数据模型、API、核心流程、实施顺序。
-> **交付边界（D-19）**：本系统不是 Agent——交付 `dag-server`（API 服务，一服务多项目）+ `dag-cli`（TUI 客户端，目录绑定默认项目）两个二进制，零 LLM 集成；Planner/Worker 是外部调用方。
+> 输入：[00-需求分析](../00-需求分析/README.md)（FR-01~FR-13、D-01~D-20 已全部落定，2026-07-16 封版）
+> 本目录把 20 条决策变成可实现的系统设计：组件、数据模型、API、核心流程、实施顺序。
+> **产品名（D-20）**：**sunmao（榫卯）**——部件各自打磨，靠冻结的 Contract 咬合拼装，不用胶水（无 merge）。
+> **交付边界（D-19）**：本系统不是 Agent——交付 `sunmao-server`（API 服务，一服务多项目）+ `sunmao`（TUI CLI，目录绑定默认项目）两个二进制，零 LLM 集成；Planner/Worker 是外部调用方。
 
 ## 文档索引
 
@@ -24,7 +25,7 @@
 | D-05 租约 + 接力协议 | 02（lease 字段）、03（claim/heartbeat/handover-review）、04 §流程二 |
 | D-06/07 重试 + 原 Task 重开 | 02（attempt 表）、04 §流程三 |
 | D-08 Contract semver | 04 §流程四 |
-| D-09 PG + 轻量 Git | 01（dag-store / git 子进程）、02 |
+| D-09 PG + 轻量 Git | 01（sunmao-store / git 子进程）、02 |
 | D-10/11/15 写范围 + 无 merge + 直写 | 04 §流程一（diff 核验 → commit） |
 | D-12 单 Planner | 01（Planner 是角色不是服务）、03 |
 | D-13/14 priority + 人可 Claim | 02、03 |
