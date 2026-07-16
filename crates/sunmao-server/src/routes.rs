@@ -18,8 +18,34 @@ use uuid::Uuid;
 
 use crate::state::AppState;
 
-/// Static Web UI directory (packaged next to crate; no LLM, pure human console).
+/// Static Web UI directory (no LLM, pure human console).
+/// Resolution order: `SUNMAO_UI_DIR` → `./static` next to cwd → next to binary → compile-time crate static.
 pub fn web_ui_dir() -> PathBuf {
+    if let Ok(p) = std::env::var("SUNMAO_UI_DIR") {
+        let p = PathBuf::from(p);
+        if p.is_dir() {
+            return p;
+        }
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let candidates = [
+        cwd.join("static"),
+        cwd.join("crates/sunmao-server/static"),
+        std::env::current_exe()
+            .ok()
+            .and_then(|e| e.parent().map(|p| p.join("static")))
+            .unwrap_or_default(),
+        std::env::current_exe()
+            .ok()
+            .and_then(|e| e.parent().map(|p| p.join("../share/sunmao/static")))
+            .unwrap_or_default(),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("static"),
+    ];
+    for c in candidates {
+        if c.is_dir() {
+            return c;
+        }
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("static")
 }
 
