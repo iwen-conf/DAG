@@ -11,3 +11,7 @@
 .ai-code-index/.last-profile
 .ai-code-index/.last-indexed-at
 .ai-code-index/.reindex.lock/
+
+.env
+.env.*
+.sunmao.toml
