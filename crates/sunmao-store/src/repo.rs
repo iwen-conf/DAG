@@ -453,7 +453,13 @@ impl Store {
             .bind(project_id)
             .bind(&node_id)
             .bind(actor)
-            .bind(json!({ "owner": actor, "lease_token": token, "attempt_seq": seq_no }))
+            .bind(json!({
+                "owner": actor,
+                "lease_token": token,
+                "attempt_seq": seq_no,
+                "lease_ttl_secs": ttl,
+                "lease_expires": expires,
+            }))
             .execute(&mut *tx)
             .await?;
 
@@ -1648,7 +1654,7 @@ impl Store {
         let rows = sqlx::query(
             r#"
             SELECT id, kind, task_state, ready, needs_replan, scope_state, owner,
-                   lease_token::text AS lease_token, plan_state
+                   lease_token::text AS lease_token, lease_expires, plan_state
             FROM node WHERE project_id = $1 ORDER BY id
             "#,
         )
@@ -1667,6 +1673,7 @@ impl Store {
                     "scope_state": r.get::<String,_>("scope_state"),
                     "owner": r.get::<Option<String>,_>("owner"),
                     "lease_token": r.get::<Option<String>,_>("lease_token"),
+                    "lease_expires": r.get::<Option<DateTime<Utc>>,_>("lease_expires"),
                     "plan_state": r.get::<String,_>("plan_state"),
                 })
             })
@@ -1733,10 +1740,36 @@ impl Store {
                             .get("lease_token")
                             .and_then(|x| x.as_str())
                             .and_then(|s| Uuid::parse_str(s).ok());
+                        // Prefer persisted lease_expires; legacy events: now()+ttl (default 900).
+                        let expires: DateTime<Utc> = payload
+                            .get("lease_expires")
+                            .and_then(|v| {
+                                v.as_str()
+                                    .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+                                    .map(|d| d.with_timezone(&Utc))
+                                    .or_else(|| {
+                                        // serde_json may deserialize timestamps as strings already handled
+                                        None
+                                    })
+                            })
+                            .or_else(|| {
+                                // chrono via serde Value might be a string from our json!
+                                payload.get("lease_expires").and_then(|v| {
+                                    serde_json::from_value::<DateTime<Utc>>(v.clone()).ok()
+                                })
+                            })
+                            .unwrap_or_else(|| {
+                                let ttl = payload
+                                    .get("lease_ttl_secs")
+                                    .and_then(|x| x.as_i64())
+                                    .filter(|t| *t > 0)
+                                    .unwrap_or(900);
+                                Utc::now() + chrono::Duration::seconds(ttl)
+                            });
                         sqlx::query(
                             r#"
                             UPDATE node SET task_state='claimed', ready=false, owner=$3,
-                              lease_token=$4, updated_at=now()
+                              lease_token=$4, lease_expires=$5, updated_at=now()
                             WHERE project_id=$1 AND id=$2
                             "#,
                         )
@@ -1744,6 +1777,7 @@ impl Store {
                         .bind(nid)
                         .bind(owner)
                         .bind(token)
+                        .bind(expires)
                         .execute(&mut *tx)
                         .await?;
                         applied += 1;

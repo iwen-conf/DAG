@@ -3,13 +3,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use chrono::Utc;
 use sqlx::postgres::PgPoolOptions;
 use sunmao_core::graph::{EdgeDraft, NodeDraft, PublishInput};
 use sunmao_store::git::GitWorkspace;
 use sunmao_store::projects::ProjectsRepo;
 use sunmao_store::Store;
 use uuid::Uuid;
-// sqlx used for corruption in rebuild test
 
 fn db_url() -> String {
     std::env::var("DATABASE_URL").unwrap_or_else(|_| "postgres://sunmao@localhost/sunmao".into())
@@ -598,6 +598,26 @@ async fn m4_rebuild_projection_restores_after_corruption() {
     assert_eq!(b_after["task_state"], b_before["task_state"]);
     assert_eq!(b_after["needs_replan"], b_before["needs_replan"]);
     assert_eq!(b_after["owner"], b_before["owner"]);
+    // lease must be restored so claimed tasks are not permanently stuck
+    assert_eq!(b_after["lease_token"], b_before["lease_token"]);
+    assert!(
+        !b_after["lease_expires"].is_null(),
+        "rebuild must restore lease_expires for claimed tasks"
+    );
+    let token = Uuid::parse_str(b_after["lease_token"].as_str().unwrap()).unwrap();
+    // real lease path: heartbeat with restored token must succeed
+    let exp = store
+        .heartbeat(&pid, "nd_b", "agent:w2", token, 120)
+        .await
+        .expect("post-rebuild heartbeat with restored lease must work");
+    assert!(exp > Utc::now());
+    // submit still works on real lease path after rebuild
+    git.write_file("b/out.txt", "B after rebuild\n").unwrap();
+    let sb = store
+        .submit(&pid, "nd_b", "agent:w2", token, None)
+        .await
+        .expect("post-rebuild submit with restored lease must work");
+    assert_eq!(sb.verdict, "done");
 }
 
 #[tokio::test]
