@@ -15,6 +15,7 @@
 | M3 完工链与接力 | ✅ 完成 |
 | M4 Contract / 事件 / CLI | ✅ 完成 |
 | M5 毕业考（提示词 + 12.7 场景） | ✅ 完成 |
+| Web UI（`/ui/` 人用控制台） | ✅ 完成（服务内静态页，无 LLM） |
 
 - 代码：`crates/sunmao-core` / `sunmao-store` / `sunmao-server` / `sunmao-cli`
 - 验收清单与例外说明：[05-实施计划.md](./05-实施计划.md) 文首「实现状态」

@@ -6,10 +6,16 @@
 
 | 二进制 | 作用 |
 |--------|------|
-| `sunmao-server` | 唯一常驻服务：图 / 任务 / 租约 / 事件 / 产物 |
+| `sunmao-server` | 唯一常驻服务：图 / 任务 / 租约 / 事件 / 产物 + **Web UI**（`/ui/`） |
 | `sunmao` | 人用 CLI（TUI 配置与项目列表 + 目录绑定） |
 
-Planner / Worker 是**外部** Agent，只调 HTTP。
+Planner / Worker 是**外部** Agent，只调 HTTP。服务**不内嵌 LLM**。
+
+Web UI（人用控制台，同机同源调用 API）：
+
+```text
+http://127.0.0.1:7420/ui/
+```
 
 ## Workspace
 

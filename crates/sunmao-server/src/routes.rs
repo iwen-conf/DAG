@@ -1,9 +1,10 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Redirect};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::stream::Stream;
@@ -11,13 +12,24 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sunmao_core::graph::PublishInput;
 use sunmao_store::projects::ProjectsRepo;
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use uuid::Uuid;
 
 use crate::state::AppState;
 
+/// Static Web UI directory (packaged next to crate; no LLM, pure human console).
+pub fn web_ui_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("static")
+}
+
 pub fn router(state: Arc<AppState>) -> Router {
+    let ui_dir = web_ui_dir();
+    let index = ui_dir.join("index.html");
+    let ui = ServeDir::new(&ui_dir).not_found_service(ServeFile::new(index));
+
     Router::new()
+        .route("/", get(|| async { Redirect::temporary("/ui/") }))
         .route("/health", get(|| async { "ok" }))
         .route("/v1/projects", post(create_project).get(list_projects))
         .route("/v1/projects/lookup", get(lookup_project))
@@ -52,6 +64,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(rebuild_projection),
         )
         .route("/v1/projects/{pid}/admin/verify", post(verify_ready))
+        .nest_service("/ui", ui)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

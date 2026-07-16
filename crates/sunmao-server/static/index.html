@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>sunmao · 榫卯</title>
+  <link rel="stylesheet" href="/ui/styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo">榫</span>
+      <div>
+        <strong>sunmao</strong>
+        <span class="muted">任务板 · 非 Agent</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <label class="field inline">
+        <span>Actor</span>
+        <input id="actor" value="human" title="X-Sunmao-Actor（人用 human）" />
+      </label>
+      <button type="button" id="btn-refresh" class="btn">刷新</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel projects">
+      <div class="panel-head">
+        <h2>项目</h2>
+        <button type="button" id="btn-new-project" class="btn small">新建</button>
+      </div>
+      <div id="project-create" class="create-form hidden">
+        <input id="new-name" placeholder="名称" />
+        <input id="new-repo" placeholder="repo 绝对路径" />
+        <button type="button" id="btn-create-project" class="btn primary small">注册</button>
+      </div>
+      <ul id="project-list" class="list"></ul>
+      <p id="projects-empty" class="empty muted">暂无项目。用 CLI <code>sunmao init</code> 或上方新建。</p>
+    </aside>
+
+    <section class="panel main-panel">
+      <div id="welcome" class="welcome">
+        <h1>sunmao Web UI</h1>
+        <p class="muted">
+          人用控制台：看图、事件、范围操作。服务本身<strong>不内嵌 LLM</strong>；
+          Planner/Worker 是外部调用方。
+        </p>
+        <p class="muted">从左侧选择项目，或打开 API：<code>/v1/…</code></p>
+      </div>
+
+      <div id="project-view" class="hidden">
+        <div class="project-bar">
+          <div>
+            <h2 id="pv-name">—</h2>
+            <div class="meta">
+              <code id="pv-id"></code>
+              <span id="pv-repo" class="muted"></span>
+            </div>
+          </div>
+          <div class="tabs">
+            <button type="button" data-tab="tree" class="tab active">任务树</button>
+            <button type="button" data-tab="events" class="tab">事件</button>
+            <button type="button" data-tab="admin" class="tab">运维</button>
+          </div>
+        </div>
+
+        <div id="tab-tree" class="tab-body">
+          <div class="split">
+            <div class="tree-wrap">
+              <div class="toolbar">
+                <span class="muted" id="graph-version">version —</span>
+                <button type="button" id="btn-reload-graph" class="btn small">重载图</button>
+              </div>
+              <div id="node-tree" class="tree"></div>
+            </div>
+            <div class="detail" id="node-detail">
+              <p class="muted">选择节点查看详情与操作</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="tab-events" class="tab-body hidden">
+          <div class="toolbar">
+            <label class="field inline">
+              <span>after_seq</span>
+              <input id="after-seq" type="number" value="0" min="0" />
+            </label>
+            <button type="button" id="btn-load-events" class="btn small">拉取</button>
+            <label class="check">
+              <input type="checkbox" id="sse-toggle" />
+              实时 SSE
+            </label>
+          </div>
+          <div id="event-list" class="events"></div>
+        </div>
+
+        <div id="tab-admin" class="tab-body hidden">
+          <div class="admin-grid">
+            <div class="card">
+              <h3>投影</h3>
+              <p class="muted">从事件流重放状态投影（task_state / ready / lease…）</p>
+              <button type="button" id="btn-rebuild" class="btn primary">rebuild-projection</button>
+              <button type="button" id="btn-verify" class="btn">verify ready</button>
+              <pre id="admin-out" class="out"></pre>
+            </div>
+            <div class="card">
+              <h3>Contract major</h3>
+              <p class="muted">仅 human 可放行（agent 会 403）</p>
+              <input id="artifact-id" placeholder="artifact id (ar_…)" />
+              <button type="button" id="btn-approve-major" class="btn primary">approve-major</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/ui/app.js"></script>
+</body>
+</html>

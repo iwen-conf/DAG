@@ -95,6 +95,7 @@ async fn main() -> anyhow::Result<()> {
     let app = routes::router(state);
     let addr: SocketAddr = listen.parse().context("listen addr")?;
     tracing::info!(%addr, "sunmao-server listening");
+    tracing::info!(ui = %format!("http://{addr}/ui/"), "web UI (human console, no LLM)");
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
