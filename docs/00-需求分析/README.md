@@ -42,6 +42,7 @@
 | [12-难点与产品定位.md](./12-难点与产品定位.md) | 五大难点、AI Cargo、非目标 |
 | [13-详细功能需求清单.md](./13-详细功能需求清单.md) | 编号化、可验收的产品功能需求 |
 | [14-非功能需求与待决策项.md](./14-非功能需求与待决策项.md) | 并发、一致性、可观测性、安全与产品决策 |
+| [15-决策记录.md](./15-决策记录.md) | D-01~D-18 决策（✅ 已确认：PostgreSQL+Git、无认证）；Temporal / SQLite 否决论证 |
 
 ### 原文
 
@@ -65,10 +66,12 @@
 
 ## 待后续澄清
 
-- Architecture / Contract 的正式 schema 与版本策略  
-- 写冲突、Merge 与 Git 集成  
-- Validator 注册模型与 Replanner 细节  
-- 多 Planner 协作与冲突解决  
-- Task IR 正式语法与确定性规则库  
-- Claim 租约、故障恢复、优先级和公平性策略  
-- Planner 草案的人工审批边界
+> 以下各项已在 [15-决策记录.md](./15-决策记录.md) 给出建议方案（待逐项确认）：
+
+- Architecture / Contract 的正式 schema 与版本策略 → D-08
+- 写冲突、Merge 与 Git 集成 → D-09 / D-10 / D-11 / D-15
+- Validator 注册模型与 Replanner 细节 → D-06 / D-07
+- 多 Planner 协作与冲突解决 → D-12
+- Task IR 正式语法与确定性规则库（仍开放，属架构设计）
+- Claim 租约、故障恢复、优先级和公平性策略 → D-05 / D-13
+- Planner 草案的人工审批边界 → D-01
