@@ -1,0 +1,13 @@
+# macOS
+.DS_Store
+
+# Rust
+/target/
+**/*.rs.bk
+
+# AI code index generated artifacts
+.ai-code-index/index/
+.ai-code-index/tags
+.ai-code-index/.last-profile
+.ai-code-index/.last-indexed-at
+.ai-code-index/.reindex.lock/
